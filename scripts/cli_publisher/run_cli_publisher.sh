@@ -1,5 +1,5 @@
 #!/bin/bash
-
+echo "run the script from "ros2_workspace" directory only"
 # Run CLI Publisher for LLM Node Communication
 echo "🚀 Starting CLI Publisher..."
 echo "================================"
@@ -7,12 +7,14 @@ echo "This will connect to the LLM node for interactive communication."
 echo "Make sure the LLM node is running in another terminal first!"
 echo ""
 
-cd /workspace/M1_WiredUp/ros2_workspace
+# cd /workspace/M1_WiredUp/ros2_workspace
 
 # Activate virtual environment and ROS2
 source ./venv/bin/activate
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
+source .env
+export OPENAI_API_KEY
 
 echo "✅ Environment setup complete!"
 echo "📡 Available topics:"
