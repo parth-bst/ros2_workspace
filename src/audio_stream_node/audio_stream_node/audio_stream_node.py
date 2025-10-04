@@ -20,13 +20,17 @@ class AudioStreamNode(Node):
     def __init__(self):
         super().__init__('audio_stream_node')
         
-        # Audio configuration for re-speaker
+        # Audio configuration for re-speaker (optimized for low latency)
         self.RESPEAKER_RATE = 16000
         self.RESPEAKER_CHANNELS = 1  # Mono for wake word detection
         self.RESPEAKER_WIDTH = 2     # 16-bit
         self.RESPEAKER_INDEX = 0     # Adjust based on your device
-        self.CHUNK = 1024
-        self.STREAM_DURATION = 1.0   # Stream 1 second chunks
+        self.CHUNK = 256             # Small chunk size for minimal latency (reduced from 1024)
+        self.STREAM_DURATION = 0.016 # Stream 16ms chunks (reduced from 1 second)
+        
+        # Low-latency mode configuration
+        self.low_latency_mode = True
+        self.streaming_interval = 0.001  # 1ms interval between stream operations
         
         # Create publisher for raw audio data
         self.audio_publisher = self.create_publisher(
@@ -58,8 +62,10 @@ class AudioStreamNode(Node):
             10
         )
         
-        self.get_logger().info('🎤 Audio Stream Node initialized')
+        self.get_logger().info('🎤 Audio Stream Node initialized (LOW-LATENCY MODE)')
         self.get_logger().info(f'Audio config: {self.RESPEAKER_RATE}Hz, {self.RESPEAKER_CHANNELS}ch, {self.RESPEAKER_WIDTH*8}-bit')
+        self.get_logger().info(f'⚡ Chunk size: {self.CHUNK} samples ({self.CHUNK/16000*1000:.1f}ms)')
+        self.get_logger().info(f'⚡ Streaming interval: {self.streaming_interval*1000:.0f}ms')
         self.get_logger().info(f'Streaming to: /audio_stream')
         self.get_logger().info(f'Listening for responses on: /wake_word_detected, /llm_response')
         
@@ -74,25 +80,31 @@ class AudioStreamNode(Node):
         self.streaming_thread.start()
     
     def _initialize_audio(self):
-        """Initialize PyAudio interface and stream."""
+        """Initialize PyAudio interface and stream - optimized for low latency."""
         try:
             self.audio_interface = pyaudio.PyAudio()
             
+            # Configure for low-latency audio capture
             self.audio_stream = self.audio_interface.open(
                 format=self.audio_interface.get_format_from_width(self.RESPEAKER_WIDTH),
                 channels=self.RESPEAKER_CHANNELS,
                 rate=self.RESPEAKER_RATE,
                 input=True,
                 input_device_index=self.RESPEAKER_INDEX,
-                frames_per_buffer=self.CHUNK
+                frames_per_buffer=self.CHUNK,
+                stream_callback=None,  # No callback for direct control
+                start=False  # Start manually for better control
             )
             
+            # Start the stream manually
+            self.audio_stream.start_stream()
             self.streaming_active = True
-            self.get_logger().info('✅ Audio stream initialized successfully')
+            
+            self.get_logger().info(f'✅ Low-latency audio stream initialized (chunk: {self.CHUNK})')
             
             # Publish status update
             status_msg = String()
-            status_msg.data = "Audio streaming started"
+            status_msg.data = "Low-latency audio streaming started"
             self.status_publisher.publish(status_msg)
             
             return True
@@ -103,8 +115,8 @@ class AudioStreamNode(Node):
             return False
     
     def _audio_streaming_loop(self):
-        """Main audio streaming loop."""
-        self.get_logger().info('🎵 Starting audio streaming loop...')
+        """Main audio streaming loop - optimized for minimal latency."""
+        self.get_logger().info('🎵 Starting low-latency audio streaming loop...')
         
         # Initialize audio
         if not self._initialize_audio():
@@ -113,16 +125,16 @@ class AudioStreamNode(Node):
         
         while rclpy.ok() and self.streaming_active:
             try:
-                # Read audio data
+                # Read audio data with minimal buffering
                 audio_data = self.audio_stream.read(
                     self.CHUNK, 
                     exception_on_overflow=False
                 )
                 
-                # Convert to numpy array for processing
+                # Convert to numpy array for processing (optimized)
                 audio_array = np.frombuffer(audio_data, dtype=np.int16)
                 
-                # Create ROS2 Audio message
+                # Create ROS2 Audio message (streamlined)
                 audio_msg = Audio()
                 audio_msg.header.stamp = self.get_clock().now().to_msg()
                 audio_msg.header.frame_id = "respeaker_mic"
@@ -134,19 +146,22 @@ class AudioStreamNode(Node):
                 audio_msg.bitrate = self.RESPEAKER_RATE * self.RESPEAKER_CHANNELS * 16
                 audio_msg.coding_format = 1  # 1 = PCM
                 
-                # Pack audio data as bytes
+                # Pack audio data as bytes (optimized)
                 audio_bytes = struct.pack(f'{len(audio_array)}h', *audio_array)
                 audio_msg.data = list(audio_bytes)
                 
-                # Publish audio data
+                # Publish audio data immediately
                 self.audio_publisher.publish(audio_msg)
                 
-                # Brief pause to prevent overwhelming the network
-                time.sleep(0.01)
+                # Minimal pause for low-latency mode
+                if self.low_latency_mode:
+                    time.sleep(self.streaming_interval)  # 1ms
+                else:
+                    time.sleep(0.01)  # 10ms for normal mode
                 
             except Exception as e:
                 self.get_logger().error(f'Error in audio streaming: {e}')
-                time.sleep(0.1)
+                time.sleep(0.01)  # Reduced error sleep time
         
         # Cleanup
         self._cleanup_audio()

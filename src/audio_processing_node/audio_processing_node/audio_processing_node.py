@@ -22,6 +22,8 @@ import os
 import tempfile
 from typing import Optional
 import struct
+import pyaudio
+import queue
 
 class AudioProcessingNode(Node):
     """
@@ -52,11 +54,24 @@ class AudioProcessingNode(Node):
         self.LABELS = ['down', 'go', 'left', 'no', 'right', 'stop', 'up', 'yes']
         self.CONFIDENCE_THRESHOLD = 0.3  # Minimum confidence for detection
         
-        # Audio buffer for processing
+        # Audio buffer for processing (optimized for low latency)
         self.audio_buffer = []
         self.buffer_lock = threading.Lock()
-        self.buffer_size = 16000  # 1 second at 16kHz
-        self.processing_interval = 0.5  # Process every 0.5 seconds
+        self.buffer_size = 1600  # 100ms at 16kHz (reduced from 1 second)
+        self.processing_interval = 0.1  # Process every 100ms (reduced from 500ms)
+        
+        # Audio playback configuration (optimized for minimal latency)
+        self.playback_queue = queue.Queue(maxsize=10)  # Small buffer for minimal latency
+        self.playback_active = False
+        self.audio_interface = None
+        self.playback_stream = None
+        
+        # Low-latency mode flags
+        self.low_latency_mode = True
+        self.playback_priority = True  # Prioritize playback over processing
+        
+        # Initialize audio playback
+        self._initialize_audio_playback()
         
         # Check if model file exists
         if not os.path.exists(self.MODEL_PATH):
@@ -109,49 +124,74 @@ class AudioProcessingNode(Node):
             10
         )
         
-        self.get_logger().info('🧠 Audio Processing Node initialized')
+        self.get_logger().info('🧠 Audio Processing Node initialized (LOW-LATENCY MODE)')
         self.get_logger().info(f'Listening for keywords: {", ".join(self.LABELS)}')
         self.get_logger().info(f'Model path: {self.MODEL_PATH}')
-        self.get_logger().info(f'Subscribing to: /audio_stream (from Pi)')
+        self.get_logger().info(f'Subscribing to: /audio_stream (from Pi, Domain 0)')
         self.get_logger().info(f'Publishing to: /wake_word_detected, /llm_input')
+        self.get_logger().info(f'🔊 Low-latency audio playback: MacBook speakers')
+        self.get_logger().info(f'⚡ Buffer size: {self.buffer_size} samples ({self.buffer_size/16000*1000:.0f}ms)')
+        self.get_logger().info(f'⚡ Playback chunk: {self.PLAYBACK_CHUNK} samples ({self.PLAYBACK_CHUNK/16000*1000:.1f}ms)')
+        self.get_logger().info(f'⚡ Processing interval: {self.processing_interval*1000:.0f}ms')
         
         # Start audio processing loop
         self.processing_thread = threading.Thread(target=self._audio_processing_loop)
         self.processing_thread.daemon = True
         self.processing_thread.start()
         
+        # Start audio playback loop
+        self.playback_thread = threading.Thread(target=self._audio_playback_loop)
+        self.playback_thread.daemon = True
+        self.playback_thread.start()
+        
         # Publish initial status
         self._publish_status("Audio processing node started")
     
     def audio_callback(self, msg):
-        """Handle incoming audio stream from Pi."""
+        """Handle incoming audio stream from Pi - optimized for minimal latency."""
         try:
             # Convert ROS Audio message to numpy array
-            # msg.data is a list of bytes, we need to unpack it as int16
             audio_bytes = bytes(msg.data)
             audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
             
-            # Add to buffer with thread safety
-            with self.buffer_lock:
-                self.audio_buffer.extend(audio_array)
-                
-                # Keep buffer size manageable
-                if len(self.audio_buffer) > self.buffer_size * 2:
-                    self.audio_buffer = self.audio_buffer[-self.buffer_size:]
+            # PRIORITY 1: Immediate playback (non-blocking, highest priority)
+            if self.playback_active:
+                try:
+                    self.playback_queue.put_nowait(audio_bytes)
+                except queue.Full:
+                    # If queue is full, drop oldest audio to maintain real-time playback
+                    try:
+                        self.playback_queue.get_nowait()  # Remove oldest
+                        self.playback_queue.put_nowait(audio_bytes)  # Add new
+                    except queue.Empty:
+                        pass
             
-            # Debug info (occasionally)
-            if len(self.audio_buffer) % 16000 == 0:  # Every second
-                self.get_logger().debug(f'📊 Audio buffer size: {len(self.audio_buffer)} samples')
+            # PRIORITY 2: Processing buffer (only if not in low-latency mode or if buffer is small)
+            if not self.low_latency_mode or len(self.audio_buffer) < self.buffer_size:
+                with self.buffer_lock:
+                    self.audio_buffer.extend(audio_array)
+                    
+                    # Keep buffer size small for low latency
+                    if len(self.audio_buffer) > self.buffer_size * 1.5:
+                        self.audio_buffer = self.audio_buffer[-self.buffer_size:]
+            
+            # Reduced debug frequency for performance
+            if len(self.audio_buffer) % 8000 == 0:  # Every 0.5 seconds
+                self.get_logger().debug(f'📊 Audio buffer: {len(self.audio_buffer)} samples, Queue: {self.playback_queue.qsize()}')
                 
         except Exception as e:
             self.get_logger().error(f'Error processing audio stream: {e}')
     
     def _audio_processing_loop(self):
-        """Main audio processing loop."""
-        self.get_logger().info('🔄 Starting audio processing loop...')
+        """Main audio processing loop - optimized for low-latency mode."""
+        self.get_logger().info('🔄 Starting audio processing loop (low-latency mode)...')
         
         while rclpy.ok():
             try:
+                # In low-latency mode, reduce processing frequency to prioritize playback
+                if self.low_latency_mode:
+                    time.sleep(self.processing_interval)  # Sleep first to prioritize playback
+                
                 # Check if we have enough audio data
                 with self.buffer_lock:
                     if len(self.audio_buffer) >= self.buffer_size:
@@ -185,12 +225,13 @@ class AudioProcessingNode(Node):
                         # Update status
                         self._publish_status(f"Wake word detected: {command.upper()}")
                 
-                # Wait before next processing cycle
-                time.sleep(self.processing_interval)
+                # Adaptive sleep based on mode
+                if not self.low_latency_mode:
+                    time.sleep(self.processing_interval)
                 
             except Exception as e:
                 self.get_logger().error(f'Error in audio processing loop: {e}')
-                time.sleep(1)
+                time.sleep(0.1)  # Reduced error sleep time
     
     def _recognize_speech_from_buffer(self, audio_data):
         """Run inference on audio buffer."""
@@ -256,9 +297,99 @@ class AudioProcessingNode(Node):
         self.get_logger().info(f'🤖 LLM Response: {msg.data}')
         self._publish_status(f"LLM response received: {msg.data[:50]}...")
     
+    def _initialize_audio_playback(self):
+        """Initialize audio playback system for MacBook speakers - optimized for minimal latency."""
+        try:
+            self.audio_interface = pyaudio.PyAudio()
+            
+            # Audio playback configuration optimized for minimal latency
+            self.PLAYBACK_RATE = 16000
+            self.PLAYBACK_CHANNELS = 1  # Mono
+            self.PLAYBACK_WIDTH = 2     # 16-bit
+            self.PLAYBACK_CHUNK = 256   # Smaller chunk size for lower latency (reduced from 1024)
+            
+            # Configure for low-latency audio
+            self.playback_stream = self.audio_interface.open(
+                format=self.audio_interface.get_format_from_width(self.PLAYBACK_WIDTH),
+                channels=self.PLAYBACK_CHANNELS,
+                rate=self.PLAYBACK_RATE,
+                output=True,
+                frames_per_buffer=self.PLAYBACK_CHUNK,
+                stream_callback=None,  # No callback for direct control
+                start=False  # Start manually for better control
+            )
+            
+            # Start the stream
+            self.playback_stream.start_stream()
+            self.playback_active = True
+            
+            self.get_logger().info(f'🔊 Low-latency audio playback initialized (chunk: {self.PLAYBACK_CHUNK})')
+            self._publish_status("Low-latency audio playback initialized")
+            
+        except Exception as e:
+            self.get_logger().error(f'❌ Failed to initialize audio playback: {e}')
+            self.playback_active = False
+    
+    def _audio_playback_loop(self):
+        """Main audio playback loop - optimized for minimal latency."""
+        self.get_logger().info('🔊 Starting low-latency audio playback loop...')
+        
+        # Set thread priority for real-time audio (if possible)
+        try:
+            import threading
+            # Note: Python threading priority is limited, but we can set daemon=True
+            current_thread = threading.current_thread()
+            current_thread.daemon = True
+        except:
+            pass
+        
+        while rclpy.ok() and self.playback_active:
+            try:
+                # Get audio data from queue with minimal timeout for real-time playback
+                try:
+                    audio_data = self.playback_queue.get(timeout=0.01)  # 10ms timeout (reduced from 100ms)
+                    
+                    # Immediate playback - no buffering delays
+                    if self.playback_stream and audio_data:
+                        try:
+                            self.playback_stream.write(audio_data, exception_on_underflow=False)
+                        except Exception as stream_error:
+                            # Handle underflow gracefully to maintain real-time playback
+                            if "Input overflowed" not in str(stream_error):
+                                self.get_logger().debug(f'Playback stream issue: {stream_error}')
+                        
+                except queue.Empty:
+                    # No audio data - continue immediately (no sleep for minimal latency)
+                    continue
+                    
+            except Exception as e:
+                self.get_logger().error(f'Error in audio playback: {e}')
+                time.sleep(0.001)  # Minimal sleep on error (1ms)
+        
+        # Cleanup
+        self._cleanup_audio_playback()
+    
+    def _cleanup_audio_playback(self):
+        """Clean up audio playback resources."""
+        try:
+            self.playback_active = False
+            
+            if self.playback_stream:
+                self.playback_stream.stop_stream()
+                self.playback_stream.close()
+            
+            if self.audio_interface:
+                self.audio_interface.terminate()
+                
+            self.get_logger().info('🧹 Audio playback resources cleaned up')
+            
+        except Exception as e:
+            self.get_logger().error(f'Error cleaning up audio playback: {e}')
+    
     def destroy_node(self):
         """Clean shutdown."""
         self.get_logger().info('🧠 Audio processing node shutting down...')
+        self._cleanup_audio_playback()
         super().destroy_node()
 
 def main(args=None):
