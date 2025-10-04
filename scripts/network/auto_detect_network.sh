@@ -245,123 +245,7 @@ EOF
     log_success "Updated MacBook audio processing node script"
 }
 
-# Update Pi run scripts with domain 0 and DDS config
-update_pi_scripts() {
-    log_info "Updating Pi run scripts with domain 0 and DDS config..."
-    
-    # Create Pi audio stream node script
-    cat > "$SCRIPT_DIR/config/run_audio_stream_node_pi.sh" << 'EOF'
-#!/bin/bash
 
-echo "run the script from "ros2_workspace" directory only"
-
-# Source ROS2 environment
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-
-echo "✅ Environment setup complete!"
-
-# Set logging environment variables for detailed output
-export RCUTILS_LOGGING_USE_STDOUT=1
-export RCUTILS_LOGGING_BUFFERED_STREAM=1
-export RCUTILS_LOGGING_SEVERITY_THRESHOLD=INFO
-
-# CRITICAL: Set domain 0 for communication with MacBook
-export ROS_DOMAIN_ID=0
-# CRITICAL: Set subnet discovery range
-export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
-
-# Source the DDS client config
-export FASTRTPS_DEFAULT_PROFILES_FILE=/home/parth/ros2_workspace/scripts/network/config/dds/discovery_client_pi.xml
-
-echo "🔧 Starting Audio Stream Node (LOW-LATENCY MODE)..."
-echo "Streaming audio to MacBook (Domain 0):"
-echo "  - /audio_stream (raw audio data to MacBook)"
-echo "Listening for responses:"
-echo "  - /wake_word_detected (from MacBook)"
-echo "  - /llm_response (from MacBook)"
-echo "⚡ Low-latency audio streaming:"
-echo "  - Chunk size: 256 samples (16ms)"
-echo "  - Streaming interval: 1ms"
-echo ""
-echo "🌐 DDS Discovery Client connecting to: $(grep -oP '<address>\K[^<]+' scripts/network/config/dds/discovery_client_pi.xml):11811"
-echo "🔗 ROS Domain ID: $ROS_DOMAIN_ID"
-echo "🌍 Discovery Range: $ROS_AUTOMATIC_DISCOVERY_RANGE"
-echo ""
-
-# Run the audio stream node
-python3 install/audio_stream_node/lib/python3.12/site-packages/audio_stream_node/audio_stream_node.py
-EOF
-
-    chmod +x "$CONFIG_DIR/run_audio_stream_node_pi.sh"
-    
-    log_success "Created Pi audio stream node script"
-}
-
-# Create deploy script that updates both MacBook and Pi
-create_deploy_script() {
-    if [ -n "$PI_IP" ]; then
-        log_info "Creating deploy script that updates both MacBook and Pi..."
-        
-        # Create a comprehensive deploy script in network/config directory
-        cat > "$SCRIPT_DIR/config/deploy_auto.sh" << EOF
-#!/bin/bash
-set -e
-
-# Auto-detected Pi configuration
-PI_HOSTNAME="${PI_HOSTNAME:-pi01.local}"
-PI_IP="$PI_IP"
-PI_USER="${PI_USER:-parth}"
-
-# Try hostname first, fallback to IP
-if ping -c 1 "$PI_HOSTNAME" >/dev/null 2>&1; then
-    PI_TARGET="\$PI_HOSTNAME"
-    echo "✅ Connected via hostname: \$PI_HOSTNAME"
-else
-    PI_TARGET="\$PI_IP"
-    echo "⚠️  Using IP fallback: \$PI_IP"
-fi
-
-PI_SSH="\$PI_USER@\$PI_TARGET"
-
-echo "🚀 Deploying to Pi: \$PI_SSH"
-echo "📦 Building packages..."
-
-# Build (uncomment if needed)
-# cd "$WORKSPACE_ROOT"
-# colcon build
-
-# Package
-cd "$WORKSPACE_ROOT/deploy"
-rm -f ros2_audio_packages.tar.gz
-tar -czf ros2_audio_packages.tar.gz ../install/* ../install/setup.bash ../install/local_setup.bash
-
-# Deploy packages and configs to Pi
-echo "📡 Uploading packages and configs..."
-scp ros2_audio_packages.tar.gz "\$PI_SSH":~/ros2_workspace/deploy/
-scp -r ../scripts/network/config "\$PI_SSH":~/ros2_workspace/scripts/network/
-
-echo "🔧 Installing on Pi..."
-ssh "\$PI_SSH" "cd ~/ros2_workspace/deploy && tar -xzf ros2_audio_packages.tar.gz"
-
-echo "✅ Deployment complete!"
-echo ""
-echo "🔧 Next steps:"
-echo "  1. On MacBook: ./scripts/audio_processing_node/run_audio_processing_node.sh"
-echo "  2. On Pi: ~/ros2_workspace/scripts/network/config/run_audio_stream_node_pi.sh"
-echo ""
-echo "🌐 Configuration Summary:"
-echo "  - MacBook IP: $LOCAL_IP"
-echo "  - Pi IP: $PI_IP"
-echo "  - DDS Server: $LOCAL_IP:11811"
-echo "  - ROS Domain: 0"
-echo "  - Discovery Range: SUBNET"
-EOF
-        
-        chmod +x "$SCRIPT_DIR/config/deploy_auto.sh"
-        log_success "Auto-deploy script created: scripts/network/config/deploy_auto.sh"
-    fi
-}
 
 # Main execution
 main() {
@@ -373,8 +257,6 @@ main() {
     if find_pi; then
         generate_dds_configs
         update_macbook_scripts
-        update_pi_scripts
-        create_deploy_script
         
         echo ""
         log_success "✅ Auto-configuration complete!"
@@ -388,9 +270,8 @@ main() {
         echo "  - Config files: scripts/network/config/dds/"
         echo ""
         echo "🚀 Next steps:"
-        echo "  1. Deploy to Pi: ./scripts/network/config/deploy_auto.sh"
-        echo "  2. Start MacBook node: ./scripts/audio_processing_node/run_audio_processing_node.sh"
-        echo "  3. Start Pi node: ~/ros2_workspace/scripts/network/config/run_audio_stream_node_pi.sh"
+        echo "  1. Start MacBook node: ./scripts/audio_processing_node/run_audio_processing_node.sh"
+        echo "  2. Manually configure Pi with DDS client config: scripts/network/config/dds/discovery_client_pi.xml"
         
     else
         log_error "❌ Cannot proceed without Pi connection"
