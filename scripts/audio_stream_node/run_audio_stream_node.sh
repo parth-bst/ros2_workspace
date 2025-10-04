@@ -1,13 +1,9 @@
 #!/bin/bash
 
 echo "run the script from "ros2_workspace" directory only"
-
-# Auto-detect network and generate DDS configs
-echo "🔍 Auto-detecting network configuration..."
-./scripts/network/auto_detect_network.sh
-
-# Source the generated config
-export FASTRTPS_DEFAULT_PROFILES_FILE=../scripts/network/config/dds/discovery_client_pi.xml
+# Run Audio Stream Node (for Raspberry Pi)
+echo "🎤 Starting Audio Stream Node..."
+echo "================================"
 
 source .env
 export OPENAI_API_KEY
@@ -27,13 +23,10 @@ export ROS_DOMAIN_ID=0
 # CRITICAL: Set subnet discovery range
 export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
 
-<<<<<<< Updated upstream
-=======
 # Source the DDS client config
 export FASTRTPS_DEFAULT_PROFILES_FILE=../scripts/network/config/dds/discovery_client_pi.xml
 echo "🌐 Using DDS client config: ../scripts/network/config/dds/discovery_client_pi.xml"
 
->>>>>>> Stashed changes
 echo "🔧 Starting Audio Stream Node (LOW-LATENCY MODE)..."
 echo "Streaming audio to MacBook (Domain 0):"
 echo "  - /audio_stream (raw audio data to MacBook)"
@@ -43,10 +36,6 @@ echo "  - /llm_response (from MacBook)"
 echo "⚡ Low-latency audio streaming:"
 echo "  - Chunk size: 256 samples (16ms)"
 echo "  - Streaming interval: 1ms"
-echo ""
-echo "🌐 DDS Discovery Client connecting to: $(grep -oP '<address>\K[^<]+' scripts/network/config/dds/discovery_client_pi.xml):11811"
-echo "🔗 ROS Domain ID: $ROS_DOMAIN_ID"
-echo "🌍 Discovery Range: $ROS_AUTOMATIC_DISCOVERY_RANGE"
 echo ""
 echo "🌐 DDS Discovery Client connecting to: $(grep -oP '<address>\K[^<]+' scripts/network/config/dds/discovery_client_pi.xml):11811"
 echo "🔗 ROS Domain ID: $ROS_DOMAIN_ID"
