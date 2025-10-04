@@ -18,7 +18,17 @@ echo "✅ Environment setup complete!"
 export RCUTILS_LOGGING_USE_STDOUT=1
 export RCUTILS_LOGGING_BUFFERED_STREAM=1
 export RCUTILS_LOGGING_SEVERITY_THRESHOLD=INFO
+
+# CRITICAL: Set domain 0 for communication with MacBook
 export ROS_DOMAIN_ID=0
+# CRITICAL: Set subnet discovery range
+export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+
+# Source the DDS client config (if available)
+if [ -f "scripts/network/config/dds/discovery_client_pi.xml" ]; then
+    export FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/M1_WiredUp/ros2_workspace/scripts/network/config/dds/discovery_client_pi.xml
+    echo "🌐 Using DDS client config: scripts/network/config/dds/discovery_client_pi.xml"
+fi
 
 echo "🔧 Starting Audio Stream Node (LOW-LATENCY MODE)..."
 echo "Streaming audio from re-speaker to:"
