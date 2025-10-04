@@ -1,3 +1,5 @@
 [user]
 	email = parth@example.com
 	name = parth-bst
+[credential]
+	helper = store

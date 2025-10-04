@@ -117,9 +117,7 @@ if ! shopt -oq posix; then
 fi
 
 # Cursor optimization settings
-export NODE_OPTIONS="--max-old-space-size=256"
-export CURSOR_DISABLE_TELEMETRY=1exisx
+export CURSOR_DISABLE_TELEMETRY=1
 export CURSOR_DISABLE_GPU=1
 
 export PATH="$HOME/.local/bin:$PATH"
-
