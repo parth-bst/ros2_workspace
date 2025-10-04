@@ -23,9 +23,17 @@ export ROS_DOMAIN_ID=0
 # CRITICAL: Set subnet discovery range
 export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
 
-# Source the DDS client config
 export FASTRTPS_DEFAULT_PROFILES_FILE=../scripts/network/config/dds/discovery_client_pi.xml
 echo "🌐 Using DDS client config: ../scripts/network/config/dds/discovery_client_pi.xml"
+# Start Discovery Client
+echo "🚀 Starting Fast DDS Discovery Client..."
+SERVER_IP=$(grep -oP '<address>\K[^<]+' scripts/network/config/dds/discovery_client_pi.xml)
+echo "🌐 Discovery Client connecting to: $SERVER_IP:11811"
+fastdds discovery -t $SERVER_IP -q 11811 &
+DISCOVERY_CLIENT_PID=$!
+echo "✅ Discovery Client started (PID: $DISCOVERY_CLIENT_PID)"
+
+# Source the DDS client config
 
 echo "🔧 Starting Audio Stream Node (LOW-LATENCY MODE)..."
 echo "Streaming audio to MacBook (Domain 0):"
@@ -41,6 +49,18 @@ echo "🌐 DDS Discovery Client connecting to: $(grep -oP '<address>\K[^<]+' scr
 echo "🔗 ROS Domain ID: $ROS_DOMAIN_ID"
 echo "🌍 Discovery Range: $ROS_AUTOMATIC_DISCOVERY_RANGE"
 echo ""
+
+# Cleanup function
+cleanup() {
+    echo "🧹 Cleaning up Discovery Client..."
+    if [ ! -z "$DISCOVERY_CLIENT_PID" ]; then
+        kill $DISCOVERY_CLIENT_PID 2>/dev/null
+        echo "✅ Discovery Client stopped"
+    fi
+}
+
+# Set trap for cleanup on exit
+trap cleanup EXIT
 
 # Run the audio stream node using direct Python module path
 ./venv/bin/python install/audio_stream_node/lib/python3.12/site-packages/audio_stream_node/audio_stream_node.py
