@@ -7,7 +7,7 @@ export OPENAI_API_KEY
 
 # Activate virtual environment and build
 source ./venv/bin/activate
-pip3 install -y -r ../src/wake_word_node/requirements.txt
+pip3 install -r src/wake_word_node/requirements.txt
 source /opt/ros/jazzy/setup.bash
 colcon build --packages-select wake_word_node
 source install/setup.bash
