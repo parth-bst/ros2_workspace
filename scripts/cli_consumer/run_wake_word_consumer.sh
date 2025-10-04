@@ -22,4 +22,4 @@ echo "  - /llm_response"
 echo ""
 
 # Run the wake word consumer
-python3 /workspace/M1_WiredUp/ros2_workspace/scripts/wake_word_node/wake_word_consumer.py
+python3 ros2_workspace/scripts/wake_word_node/wake_word_consumer.py

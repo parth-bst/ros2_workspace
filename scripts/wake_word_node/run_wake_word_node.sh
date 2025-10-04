@@ -3,9 +3,12 @@
 echo "🎤 Starting Wake Word Detection Node..."
 echo "======================================"
 
+source .env
+export OPENAI_API_KEY
 # Source ROS2 environment
+source ./venv/bin/activate
 source /opt/ros/jazzy/setup.bash
-source /workspace/M1_WiredUp/ros2_workspace/install/setup.bash
+source install/setup.bash
 
 echo "✅ Environment setup complete!"
 
@@ -23,4 +26,5 @@ echo "  - /wake_word_detected (raw detection events)"
 echo ""
 
 # Run the wake word node
-ros2 run wake_word_node wake_word_node
+# ros2 run wake_word_node wake_word_node
+./venv/bin/python install/wake_word_node/lib/python3.12/site-packages/wake_word_node/wake_word_node.py

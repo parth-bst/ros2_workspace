@@ -24,7 +24,7 @@ class AudioStreamNode(Node):
         self.RESPEAKER_RATE = 16000
         self.RESPEAKER_CHANNELS = 1  # Mono for wake word detection
         self.RESPEAKER_WIDTH = 2     # 16-bit
-        self.RESPEAKER_INDEX = 1     # Adjust based on your device
+        self.RESPEAKER_INDEX = 0     # Adjust based on your device
         self.CHUNK = 1024
         self.STREAM_DURATION = 1.0   # Stream 1 second chunks
         
