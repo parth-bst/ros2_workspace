@@ -1,6 +1,8 @@
 # ROS2 build artifacts
 build/
 install/
+deploy/install/
+deploy/*.tar.gz
 log/
 
 # Python virtual environment
