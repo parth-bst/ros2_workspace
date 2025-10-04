@@ -21,6 +21,8 @@ import time
 import os
 import subprocess
 import tempfile
+import pyaudio
+import wave
 from typing import Optional
 
 class WakeWordNode(Node):
@@ -50,8 +52,24 @@ class WakeWordNode(Node):
         
         # Model configuration
         self.LABELS = ['down', 'go', 'left', 'no', 'right', 'stop', 'up', 'yes']
-        self.AUDIO_DEVICE = "plughw:2,0"  # Adjust based on your audio device
+        
+        # Audio configuration from record.py
+        self.RESPEAKER_RATE = 16000
+        self.RESPEAKER_CHANNELS = 2 
+        self.RESPEAKER_WIDTH = 2
+        self.RESPEAKER_INDEX = 0  # refer to input device id
+        self.CHUNK = 1024
+        self.RECORD_SECONDS = 1  # Record 1 second for wake word detection
+        
         self.CONFIDENCE_THRESHOLD = 0.3  # Minimum confidence for detection
+        
+        # Initialize PyAudio
+        try:
+            self.p = pyaudio.PyAudio()
+            self.get_logger().info('PyAudio initialized successfully')
+        except Exception as e:
+            self.get_logger().error(f'Failed to initialize PyAudio: {e}')
+            return
         
         # Check if model file exists
         if not os.path.exists(self.MODEL_PATH):
@@ -141,25 +159,38 @@ class WakeWordNode(Node):
                 time.sleep(1)
     
     def _record_audio(self, output_file):
-        """Record 1 second of audio."""
+        """Record audio using PyAudio configuration from record.py."""
         try:
-            cmd = [
-                'arecord',
-                '-D', self.AUDIO_DEVICE,
-                '-f', 'S16_LE',
-                '-r', '16000',
-                '-d', '1',
-                '-t', 'wav',
-                output_file
-            ]
-            result = subprocess.run(cmd, check=True, capture_output=True)
+            # Create audio stream
+            stream = self.p.open(
+                rate=self.RESPEAKER_RATE,
+                format=self.p.get_format_from_width(self.RESPEAKER_WIDTH),
+                channels=self.RESPEAKER_CHANNELS,
+                input=True,
+                input_device_index=self.RESPEAKER_INDEX,
+            )
             
-        except subprocess.CalledProcessError as e:
-            self.get_logger().warn(f'Audio recording failed: {e}')
+            frames = []
+            
+            # Record audio for the specified duration
+            for i in range(0, int(self.RESPEAKER_RATE / self.CHUNK * self.RECORD_SECONDS)):
+                data = stream.read(self.CHUNK)
+                frames.append(data)
+            
+            stream.stop_stream()
+            stream.close()
+            
+            # Write to WAV file
+            wf = wave.open(output_file, 'wb')
+            wf.setnchannels(self.RESPEAKER_CHANNELS)
+            wf.setsampwidth(self.p.get_sample_size(self.p.get_format_from_width(self.RESPEAKER_WIDTH)))
+            wf.setframerate(self.RESPEAKER_RATE)
+            wf.writeframes(b''.join(frames))
+            wf.close()
+            
+        except Exception as e:
+            self.get_logger().warn(f'PyAudio recording failed: {e}')
             # Create a silent audio file as fallback
-            self._create_silent_audio(output_file)
-        except FileNotFoundError:
-            self.get_logger().error('arecord command not found. Please install alsa-utils.')
             self._create_silent_audio(output_file)
     
     def _create_silent_audio(self, output_file):
@@ -248,6 +279,15 @@ class WakeWordNode(Node):
     def llm_response_callback(self, msg):
         """Handle responses from LLM node."""
         self.get_logger().info(f'🤖 LLM Response: {msg.data}')
+    
+    def destroy_node(self):
+        """Clean up resources when node is destroyed."""
+        try:
+            if hasattr(self, 'p'):
+                self.p.terminate()
+        except Exception as e:
+            self.get_logger().warn(f'Error terminating PyAudio: {e}')
+        super().destroy_node()
 
 def main(args=None):
     rclpy.init(args=args)
