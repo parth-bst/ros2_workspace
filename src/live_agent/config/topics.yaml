@@ -1,0 +1,10 @@
+input_topics:
+  user_text: "/live_agent/user_text"
+
+output_topics:
+  response: "/live_agent/response"
+  status: "/live_agent/status"
+
+# Robot control topics
+robot_topics:
+  tts_speak: "/tts/speak"
